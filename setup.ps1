@@ -5,7 +5,10 @@ $ErrorActionPreference = "Stop"
 
 # --- Konfiguration ---
 $OLLAMA_MODEL = "qwen3:14b"
-$GATEWAY_TOKEN = -join ((48..57) + (97..122) | Get-Random -Count 48 | ForEach-Object { [char]$_ })
+# Kryptografisch sicheren Token generieren (CSPRNG)
+$tokenBytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
+$GATEWAY_TOKEN = [BitConverter]::ToString($tokenBytes).Replace("-", "").ToLower()
 $CONFIG_DIR = "$env:USERPROFILE\.openclaw"
 $WORKSPACE_DIR = "$CONFIG_DIR\workspace"
 $OPENCLAW_REPO = "$env:USERPROFILE\workspace\openclaw\openclaw"
@@ -81,7 +84,7 @@ if ($ollamaModels -notcontains $OLLAMA_MODEL) {
 }
 Write-Host "  OK - Model '$OLLAMA_MODEL' verfuegbar" -ForegroundColor Green
 
-# --- 3. Pruefen ob Ollama auf 0.0.0.0 lauscht (Docker-Zugriff) ---
+# --- 3. Pruefen ob Ollama fuer Docker erreichbar ist ---
 Write-Host "`n[3/7] Pruefe Ollama Docker-Zugriff..." -ForegroundColor Yellow
 try {
     $response = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5
@@ -89,7 +92,16 @@ try {
 } catch {
     Write-Host "  WARNUNG: Ollama API nicht erreichbar auf localhost:11434" -ForegroundColor Yellow
 }
-Write-Host "  HINWEIS: Damit Docker auf Ollama zugreifen kann, muss Ollama auf 0.0.0.0 lauschen." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  SICHERHEITSHINWEIS:" -ForegroundColor Red
+Write-Host "  Ollama muss auf 0.0.0.0 lauschen, damit Docker darauf zugreifen kann." -ForegroundColor Yellow
+Write-Host "  Das bedeutet: Ollama ist im gesamten LAN ohne Passwort erreichbar!" -ForegroundColor Yellow
+Write-Host "  Empfehlung: Windows-Firewall Regel erstellen, die Port 11434" -ForegroundColor Yellow
+Write-Host "  nur fuer lokale Verbindungen erlaubt:" -ForegroundColor Yellow
+Write-Host "    New-NetFirewallRule -DisplayName 'Ollama - Block LAN' ``" -ForegroundColor White
+Write-Host "      -Direction Inbound -LocalPort 11434 -Protocol TCP ``" -ForegroundColor White
+Write-Host "      -RemoteAddress LocalSubnet -Action Block" -ForegroundColor White
+Write-Host ""
 Write-Host "  Falls noetig, Ollama neu starten mit:" -ForegroundColor Yellow
 Write-Host "    `$env:OLLAMA_HOST='0.0.0.0:11434'; & '$OLLAMA_EXE' serve" -ForegroundColor White
 
@@ -155,7 +167,7 @@ $config = @"
       "token": "$GATEWAY_TOKEN"
     },
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "tailscale": {
       "mode": "off",
       "resetOnExit": false
@@ -216,7 +228,7 @@ if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
     $env:OPENCLAW_IMAGE = "openclaw:local"
     $env:OPENCLAW_GATEWAY_PORT = "18789"
     $env:OPENCLAW_BRIDGE_PORT = "18790"
-    $env:OPENCLAW_GATEWAY_BIND = "lan"
+    $env:OPENCLAW_GATEWAY_BIND = "loopback"
     # Optionale Session-Keys (nicht benoetigt fuer Ollama-only Setup)
     if (-not $env:CLAUDE_AI_SESSION_KEY) { $env:CLAUDE_AI_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_SESSION_KEY) { $env:CLAUDE_WEB_SESSION_KEY = "" }
@@ -230,7 +242,7 @@ OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
 OPENCLAW_IMAGE=openclaw:local
 OPENCLAW_GATEWAY_PORT=18789
 OPENCLAW_BRIDGE_PORT=18790
-OPENCLAW_GATEWAY_BIND=lan
+OPENCLAW_GATEWAY_BIND=loopback
 CLAUDE_AI_SESSION_KEY=
 CLAUDE_WEB_SESSION_KEY=
 CLAUDE_WEB_COOKIE=

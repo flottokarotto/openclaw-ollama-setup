@@ -164,6 +164,19 @@ docker exec openclaw-openclaw-gateway-1 node dist/index.js agents list
 docker compose -f openclaw/docker-compose.yml down
 ```
 
+## Security
+
+- **Gateway binds to loopback only** -- the dashboard is only accessible from `127.0.0.1`, not from the LAN. Change to `lan` in the config if you need remote access.
+- **Token is generated with CSPRNG** -- uses `System.Security.Cryptography.RandomNumberGenerator`, not `Get-Random`.
+- **Device pairing required** -- new browsers must be explicitly approved before they can connect.
+- **Ollama has no built-in auth** -- when binding to `0.0.0.0` (needed for Docker), Ollama is reachable from the LAN. Add a firewall rule to block external access:
+
+```powershell
+New-NetFirewallRule -DisplayName "Ollama - Block LAN" `
+  -Direction Inbound -LocalPort 11434 -Protocol TCP `
+  -RemoteAddress LocalSubnet -Action Block
+```
+
 ## License
 
 [MIT](LICENSE)
