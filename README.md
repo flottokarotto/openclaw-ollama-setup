@@ -166,7 +166,7 @@ docker compose -f openclaw/docker-compose.yml down
 
 ## Security
 
-- **Gateway binds to loopback only** -- the dashboard is only accessible from `127.0.0.1`, not from the LAN. Change to `lan` in the config if you need remote access.
+- **Ports bound to localhost only** -- Docker maps ports to `127.0.0.1` on the host, so the dashboard is not reachable from the LAN. The gateway uses `bind: lan` inside the container (required for Docker port forwarding to work).
 - **Token is generated with CSPRNG** -- uses `System.Security.Cryptography.RandomNumberGenerator`, not `Get-Random`.
 - **Device pairing required** -- new browsers must be explicitly approved before they can connect.
 - **Ollama has no built-in auth** -- when binding to `0.0.0.0` (needed for Docker), Ollama is reachable from the LAN. Add a firewall rule to block external access:

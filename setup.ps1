@@ -163,7 +163,7 @@ $config = @"
       "token": "$GATEWAY_TOKEN"
     },
     "port": 18789,
-    "bind": "loopback",
+    "bind": "lan",
     "tailscale": {
       "mode": "off",
       "resetOnExit": false
@@ -220,9 +220,11 @@ if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
     $env:OPENCLAW_WORKSPACE_DIR = $WORKSPACE_DIR
     $env:OPENCLAW_GATEWAY_TOKEN = $GATEWAY_TOKEN
     $env:OPENCLAW_IMAGE = "openclaw:local"
-    $env:OPENCLAW_GATEWAY_PORT = "18789"
-    $env:OPENCLAW_BRIDGE_PORT = "18790"
-    $env:OPENCLAW_GATEWAY_BIND = "loopback"
+    # Bind Docker ports to 127.0.0.1 only (not LAN-accessible from host)
+    $env:OPENCLAW_GATEWAY_PORT = "127.0.0.1:18789"
+    $env:OPENCLAW_BRIDGE_PORT = "127.0.0.1:18790"
+    # Gateway listens on lan inside the container (needed for Docker port forwarding)
+    $env:OPENCLAW_GATEWAY_BIND = "lan"
     # Optional session keys (not needed for Ollama-only setup)
     if (-not $env:CLAUDE_AI_SESSION_KEY) { $env:CLAUDE_AI_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_SESSION_KEY) { $env:CLAUDE_WEB_SESSION_KEY = "" }
@@ -234,9 +236,9 @@ OPENCLAW_CONFIG_DIR=$CONFIG_DIR
 OPENCLAW_WORKSPACE_DIR=$WORKSPACE_DIR
 OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
 OPENCLAW_IMAGE=openclaw:local
-OPENCLAW_GATEWAY_PORT=18789
-OPENCLAW_BRIDGE_PORT=18790
-OPENCLAW_GATEWAY_BIND=loopback
+OPENCLAW_GATEWAY_PORT=127.0.0.1:18789
+OPENCLAW_BRIDGE_PORT=127.0.0.1:18790
+OPENCLAW_GATEWAY_BIND=lan
 CLAUDE_AI_SESSION_KEY=
 CLAUDE_WEB_SESSION_KEY=
 CLAUDE_WEB_COOKIE=
@@ -258,7 +260,7 @@ CLAUDE_WEB_COOKIE=
         --restart unless-stopped `
         -v "${CONFIG_DIR}:/home/node/.openclaw" `
         -v "${WORKSPACE_DIR}:/home/node/.openclaw/workspace" `
-        -p 18789:18789 `
+        -p 127.0.0.1:18789:18789 `
         -e "OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN" `
         ghcr.io/phioranex/openclaw-docker:latest `
         gateway start --foreground
