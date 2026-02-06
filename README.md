@@ -56,6 +56,9 @@ Edit the variables at the top of `setup.ps1`:
 | `$OLLAMA_MODEL` | `qwen3:14b` | Ollama model to use |
 | `$OPENCLAW_REPO` | `~/workspace/openclaw/openclaw` | Path to the OpenClaw repo |
 | `$CONFIG_DIR` | `~/.openclaw` | OpenClaw config directory |
+| `$SETUP_TELEGRAM` | `$false` | Enable Telegram channel |
+| `$TELEGRAM_BOT_TOKEN` | `""` | Bot token from @BotFather |
+| `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs |
 
 ### Changing the model
 
@@ -78,6 +81,26 @@ Any model available in Ollama works. Popular choices:
 | `mistral:7b` | 4.1 GB | ~8 GB |
 | `gemma2:9b` | 5.4 GB | ~10 GB |
 | `qwen3:32b` | 20 GB | ~24 GB |
+
+## Telegram Channel (optional)
+
+Connect OpenClaw to Telegram so you can chat with it from your phone.
+
+### Setup
+
+1. Open Telegram, message **@BotFather**, send `/newbot`, and follow the prompts
+2. Copy the bot token (looks like `123456:ABC-DEF...`)
+3. Create `run-telegram.ps1` (gitignored) with your token:
+   ```powershell
+   $SETUP_TELEGRAM = $true
+   $TELEGRAM_BOT_TOKEN = "123456:ABC-DEF..."
+   $TELEGRAM_ALLOW_FROM = @("your_user_id")
+   . "$PSScriptRoot\setup.ps1"
+   ```
+4. Run `.\run-telegram.ps1`
+5. Send a message to your bot in Telegram
+
+To find your Telegram user ID, message **@userinfobot** or check the gateway logs after sending a message to your bot.
 
 ## Architecture
 
