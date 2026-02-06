@@ -6,13 +6,15 @@ One-script setup to run [OpenClaw](https://github.com/openclaw/openclaw) with a 
 
 The `setup.ps1` script automates the entire setup process:
 
-1. Detects Ollama installation (even if not in PATH)
-2. Verifies Docker Desktop and Ollama are running
-3. Pulls the configured model if not already downloaded
+1. Detects Ollama installation (auto-starts if not running)
+2. Pulls all configured models
+3. Verifies Docker Desktop and Ollama connectivity
 4. Creates the OpenClaw config directory and `openclaw.json`
-5. Builds the OpenClaw Docker image from source
+5. Builds the OpenClaw Docker image from source (cached -- skips if unchanged)
 6. Starts the gateway container via Docker Compose
-7. Prints the dashboard URL with auth token
+7. Runs a health check and prints the dashboard URL
+
+The gateway token is persisted across runs, so your dashboard URL stays the same.
 
 ## Prerequisites
 
@@ -20,7 +22,7 @@ The `setup.ps1` script automates the entire setup process:
 |---|---|
 | **Windows 10/11** | PowerShell 5.1+ |
 | **Docker Desktop** | Must be running before setup |
-| **Ollama** | [Download](https://ollama.com/download) and start with `ollama serve` |
+| **Ollama** | [Download](https://ollama.com/download) -- script auto-starts it if needed |
 | **OpenClaw repo** | Included as git submodule |
 
 ## Quick Start
@@ -33,10 +35,9 @@ cd ~/workspace/openclaw
 # If already cloned without --recurse-submodules:
 # git submodule update --init
 
-# 2. Make sure Docker Desktop and Ollama are running
-ollama serve
+# 2. Make sure Docker Desktop is running
 
-# 3. Run setup (in a new terminal)
+# 3. Run setup (Ollama is auto-started if needed)
 .\setup.ps1
 ```
 
@@ -49,24 +50,35 @@ docker exec openclaw-openclaw-gateway-1 node dist/index.js devices approve <requ
 
 ## Configuration
 
-Edit the variables at the top of `setup.ps1`:
+Edit the variables at the top of `setup.ps1` or override them in a wrapper script:
 
 | Variable | Default | Description |
 |---|---|---|
-| `$OLLAMA_MODEL` | `qwen3:14b` | Ollama model to use |
-| `$OPENCLAW_REPO` | `~/workspace/openclaw/openclaw` | Path to the OpenClaw repo |
-| `$CONFIG_DIR` | `~/.openclaw` | OpenClaw config directory |
+| `$OLLAMA_MODELS` | `@("qwen3:14b")` | Ollama models to register (first = primary) |
 | `$SETUP_TELEGRAM` | `$false` | Enable Telegram channel |
 | `$TELEGRAM_BOT_TOKEN` | `""` | Bot token from @BotFather |
-| `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs |
+| `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs (DMs) |
+| `$TELEGRAM_GROUP_ALLOW` | `@()` | Allowed Telegram group IDs |
+| `$AUTO_UPDATE` | `$false` | Pull latest OpenClaw source before building |
+| `$INTERACTIVE_MODEL_SELECT` | `$false` | Show model picker during setup |
 
-### Changing the model
+### Multiple models
+
+Register several models so you can switch between them in the dashboard:
 
 ```powershell
-# Pull a different model first
-ollama pull llama3.1:8b
+$OLLAMA_MODELS = @("qwen3:14b", "llama3.1:8b", "mistral:7b")
+.\setup.ps1
+```
 
-# Then edit $OLLAMA_MODEL in setup.ps1 and re-run
+All models are pulled automatically and registered in the config. The first model is the primary.
+
+### Interactive model selection
+
+Set `$INTERACTIVE_MODEL_SELECT = $true` to pick from your installed Ollama models during setup:
+
+```powershell
+$INTERACTIVE_MODEL_SELECT = $true
 .\setup.ps1
 ```
 
@@ -81,6 +93,15 @@ Any model available in Ollama works. Popular choices:
 | `mistral:7b` | 4.1 GB | ~8 GB |
 | `gemma2:9b` | 5.4 GB | ~10 GB |
 | `qwen3:32b` | 20 GB | ~24 GB |
+
+### Auto-update
+
+Set `$AUTO_UPDATE = $true` to pull the latest OpenClaw source before building. The image cache detects the change and rebuilds automatically.
+
+```powershell
+$AUTO_UPDATE = $true
+.\setup.ps1
+```
 
 ## Telegram Channel (optional)
 
@@ -101,6 +122,16 @@ Connect OpenClaw to Telegram so you can chat with it from your phone.
 5. Send a message to your bot in Telegram
 
 To find your Telegram user ID, message **@userinfobot** or check the gateway logs after sending a message to your bot.
+
+### Group chats
+
+To allow the bot in Telegram groups, add the group IDs to `$TELEGRAM_GROUP_ALLOW`:
+
+```powershell
+$TELEGRAM_GROUP_ALLOW = @("-1001234567890")
+```
+
+To find a group ID, add the bot to the group and check the gateway logs.
 
 ## Architecture
 
@@ -164,6 +195,9 @@ docker exec openclaw-openclaw-gateway-1 node dist/index.js devices approve <requ
 ## Useful Commands
 
 ```powershell
+# Quick restart (no rebuild)
+.\restart.ps1
+
 # View gateway logs
 docker compose -f openclaw/docker-compose.yml logs -f openclaw-gateway
 
@@ -183,7 +217,7 @@ docker compose -f openclaw/docker-compose.yml down
 ## Security
 
 - **Ports bound to localhost only** -- Docker maps ports to `127.0.0.1` on the host, so the dashboard is not reachable from the LAN. The gateway uses `bind: lan` inside the container (required for Docker port forwarding to work).
-- **Token is generated with CSPRNG** -- uses `System.Security.Cryptography.RandomNumberGenerator`, not `Get-Random`.
+- **Token is generated with CSPRNG** -- uses `System.Security.Cryptography.RandomNumberGenerator`, not `Get-Random`. Token is persisted across runs.
 - **Device pairing required** -- new browsers must be explicitly approved before they can connect.
 - **Ollama stays on localhost** -- Docker Desktop routes `host.docker.internal` to the host's `127.0.0.1`, so Ollama does not need to bind to `0.0.0.0` and is not exposed to the LAN.
 

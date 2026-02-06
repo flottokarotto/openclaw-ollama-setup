@@ -4,21 +4,53 @@
 $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
-$OLLAMA_MODEL = "qwen3:14b"
+# Override $OLLAMA_MODELS in a wrapper script or set before dot-sourcing.
+# First model is the primary; all are registered in the config.
+if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:14b") }
 
 # --- Telegram Channel (optional) ---
-# Override these in run-telegram.ps1 or set before dot-sourcing
-if ($null -eq $SETUP_TELEGRAM)    { $SETUP_TELEGRAM = $false }     # Set to $true to enable Telegram
-if (-not $TELEGRAM_BOT_TOKEN)     { $TELEGRAM_BOT_TOKEN = "" }     # Token from @BotFather
-if (-not $TELEGRAM_ALLOW_FROM)    { $TELEGRAM_ALLOW_FROM = @() }   # Allowed user IDs, e.g. @("123456789")
+if ($null -eq $SETUP_TELEGRAM)       { $SETUP_TELEGRAM = $false }
+if (-not $TELEGRAM_BOT_TOKEN)        { $TELEGRAM_BOT_TOKEN = "" }
+if (-not $TELEGRAM_ALLOW_FROM)       { $TELEGRAM_ALLOW_FROM = @() }
+if (-not $TELEGRAM_GROUP_ALLOW)      { $TELEGRAM_GROUP_ALLOW = @() }
 
-# Generate cryptographically secure token (CSPRNG)
-$tokenBytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
-$GATEWAY_TOKEN = [BitConverter]::ToString($tokenBytes).Replace("-", "").ToLower()
+# --- Advanced options ---
+if ($null -eq $AUTO_UPDATE)              { $AUTO_UPDATE = $false }
+if ($null -eq $INTERACTIVE_MODEL_SELECT) { $INTERACTIVE_MODEL_SELECT = $false }
+
+# --- Paths ---
 $CONFIG_DIR = "$env:USERPROFILE\.openclaw"
 $WORKSPACE_DIR = "$CONFIG_DIR\workspace"
 $OPENCLAW_REPO = "$env:USERPROFILE\workspace\openclaw\openclaw"
+
+# --- Model defaults (context window / max tokens) ---
+$modelDefaults = @{
+    "qwen3:14b"    = @{ context = 131072; maxTokens = 8192 }
+    "qwen3:32b"    = @{ context = 131072; maxTokens = 8192 }
+    "qwen3:8b"     = @{ context = 131072; maxTokens = 8192 }
+    "llama3.1:8b"  = @{ context = 131072; maxTokens = 4096 }
+    "llama3.1:70b" = @{ context = 131072; maxTokens = 4096 }
+    "mistral:7b"   = @{ context = 32768;  maxTokens = 4096 }
+    "gemma2:9b"    = @{ context = 8192;   maxTokens = 4096 }
+    "gemma2:27b"   = @{ context = 8192;   maxTokens = 4096 }
+}
+$defaultModelSpec = @{ context = 32768; maxTokens = 4096 }
+
+# --- Persist gateway token across runs ---
+$GATEWAY_TOKEN = ""
+$existingConfigPath = "$CONFIG_DIR\openclaw.json"
+if (Test-Path $existingConfigPath) {
+    try {
+        $parsed = Get-Content $existingConfigPath -Raw | ConvertFrom-Json
+        $existingToken = $parsed.gateway.auth.token
+        if ($existingToken) { $GATEWAY_TOKEN = $existingToken }
+    } catch {}
+}
+if (-not $GATEWAY_TOKEN) {
+    $tokenBytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
+    $GATEWAY_TOKEN = [BitConverter]::ToString($tokenBytes).Replace("-", "").ToLower()
+}
 
 # --- Detect Ollama installation ---
 $OLLAMA_EXE = $null
@@ -48,9 +80,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " OpenClaw + Ollama Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-if ($SETUP_TELEGRAM) {
-    Write-Host "Telegram channel enabled" -ForegroundColor Gray
-}
+if ($SETUP_TELEGRAM) { Write-Host "Telegram channel enabled" -ForegroundColor Gray }
+if ($AUTO_UPDATE)    { Write-Host "Auto-update enabled" -ForegroundColor Gray }
 
 $totalSteps = 7
 
@@ -69,34 +100,68 @@ try {
 }
 Write-Host "  OK" -ForegroundColor Green
 
-# --- 2. Check if Ollama is running and pull model ---
-Write-Host "`n[2/$totalSteps] Checking Ollama and pulling model '$OLLAMA_MODEL'..." -ForegroundColor Yellow
+# --- 2. Check Ollama, auto-start if needed, pull models ---
+Write-Host "`n[2/$totalSteps] Checking Ollama and models..." -ForegroundColor Yellow
+
+# Try to reach Ollama; auto-start if not running
+$ollamaReady = $false
 try {
-    $tagsResponse = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5
-    $ollamaModels = ($tagsResponse.Content | ConvertFrom-Json).models.name
+    Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5 | Out-Null
+    $ollamaReady = $true
 } catch {
-    Write-Host "ERROR: Ollama is not running (API at localhost:11434 not reachable)." -ForegroundColor Red
-    Write-Host "  Start Ollama first: & '$OLLAMA_EXE' serve" -ForegroundColor Yellow
+    Write-Host "  Ollama not running, starting automatically..." -ForegroundColor Yellow
+    Start-Process -FilePath $OLLAMA_EXE -ArgumentList "serve" -WindowStyle Hidden
+    for ($wait = 0; $wait -lt 10; $wait++) {
+        Start-Sleep -Seconds 1
+        try {
+            Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 2 | Out-Null
+            $ollamaReady = $true
+            break
+        } catch {}
+    }
+}
+if (-not $ollamaReady) {
+    Write-Host "ERROR: Could not start Ollama." -ForegroundColor Red
     exit 1
 }
 
-# Pull model if not available
-if ($ollamaModels -notcontains $OLLAMA_MODEL) {
-    Write-Host "  Downloading model (this may take a while)..." -ForegroundColor Yellow
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    & $OLLAMA_EXE pull $OLLAMA_MODEL 2>&1
-    $ErrorActionPreference = $prevEAP
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Failed to download model." -ForegroundColor Red
-        exit 1
+# Interactive model selection
+if ($INTERACTIVE_MODEL_SELECT) {
+    try {
+        $installed = (Invoke-RestMethod -Uri "http://localhost:11434/api/tags").models
+        if ($installed.Count -gt 0) {
+            Write-Host "  Available models:" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $installed.Count; $i++) {
+                $size = [math]::Round($installed[$i].size / 1GB, 1)
+                Write-Host "    [$($i+1)] $($installed[$i].name) (${size} GB)" -ForegroundColor White
+            }
+            $choice = Read-Host "  Select primary model (1-$($installed.Count), Enter = keep current)"
+            if ($choice -and [int]$choice -ge 1 -and [int]$choice -le $installed.Count) {
+                $OLLAMA_MODELS = @($installed[[int]$choice - 1].name)
+            }
+        }
+    } catch {}
+}
+
+# Pull all configured models
+$ollamaModels = ((Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json).models.name
+foreach ($model in $OLLAMA_MODELS) {
+    if ($ollamaModels -notcontains $model) {
+        Write-Host "  Downloading '$model' (this may take a while)..." -ForegroundColor Yellow
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $OLLAMA_EXE pull $model 2>&1
+        $ErrorActionPreference = $prevEAP
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: Failed to download model '$model'." -ForegroundColor Red
+            exit 1
+        }
     }
 }
-Write-Host "  OK - Model '$OLLAMA_MODEL' available" -ForegroundColor Green
+$modelList = $OLLAMA_MODELS -join ", "
+Write-Host "  OK - Models available: $modelList" -ForegroundColor Green
 
-# --- 3. Verify Ollama is reachable (no 0.0.0.0 binding needed) ---
-# Docker Desktop for Windows routes host.docker.internal to the host's
-# localhost, so Ollama can stay on its default 127.0.0.1 binding.
+# --- 3. Verify Ollama connectivity ---
 Write-Host "`n[3/$totalSteps] Verifying Ollama connectivity..." -ForegroundColor Yellow
 Write-Host "  OK - Docker Desktop routes to Ollama via host.docker.internal" -ForegroundColor Green
 Write-Host "  No need to change Ollama's default binding." -ForegroundColor Gray
@@ -110,6 +175,37 @@ Write-Host "  OK - $CONFIG_DIR" -ForegroundColor Green
 
 # --- 5. Write openclaw.json ---
 Write-Host "`n[5/$totalSteps] Writing openclaw.json..." -ForegroundColor Yellow
+
+$primaryModel = $OLLAMA_MODELS[0]
+
+# Build models JSON array
+$modelsJsonArray = @()
+foreach ($model in $OLLAMA_MODELS) {
+    $spec = if ($modelDefaults.ContainsKey($model)) { $modelDefaults[$model] } else { $defaultModelSpec }
+    $isFirst = ($model -eq $primaryModel)
+    $modelName = if ($isFirst) { "Local Ollama" } else { $model }
+    $modelsJsonArray += @"
+          {
+            "id": "$model",
+            "name": "$modelName",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": $($spec.context),
+            "maxTokens": $($spec.maxTokens)
+          }
+"@
+}
+$modelsJson = $modelsJsonArray -join ",`n"
+
+# Build agent model aliases
+$aliasEntries = @()
+foreach ($model in $OLLAMA_MODELS) {
+    $isFirst = ($model -eq $primaryModel)
+    $aliasName = if ($isFirst) { "Local Ollama" } else { $model }
+    $aliasEntries += "        `"ollama/$model`": { `"alias`": `"$aliasName`" }"
+}
+$aliasJson = $aliasEntries -join ",`n"
 
 $config = @"
 {
@@ -127,12 +223,10 @@ $config = @"
       },
       "workspace": "/home/node/.openclaw/workspace",
       "model": {
-        "primary": "ollama/$OLLAMA_MODEL"
+        "primary": "ollama/$primaryModel"
       },
       "models": {
-        "ollama/$OLLAMA_MODEL": {
-          "alias": "Local Ollama"
-        }
+$aliasJson
       }
     }
   },
@@ -143,15 +237,7 @@ $config = @"
         "apiKey": "ollama-local",
         "api": "openai-completions",
         "models": [
-          {
-            "id": "$OLLAMA_MODEL",
-            "name": "Local Ollama",
-            "reasoning": false,
-            "input": ["text"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 131072,
-            "maxTokens": 8192
-          }
+$modelsJson
         ]
       }
     }
@@ -186,13 +272,16 @@ $config = @"
 # Build channels config
 if ($SETUP_TELEGRAM -and $TELEGRAM_BOT_TOKEN) {
     $allowFromJson = ($TELEGRAM_ALLOW_FROM | ForEach-Object { "`"$_`"" }) -join ", "
+    $groupAllowJson = ($TELEGRAM_GROUP_ALLOW | ForEach-Object { "`"$_`"" }) -join ", "
     $telegramChannelJson = @"
 {
     "telegram": {
       "enabled": true,
       "botToken": "$TELEGRAM_BOT_TOKEN",
       "dmPolicy": "allowlist",
-      "allowFrom": [$allowFromJson]
+      "allowFrom": [$allowFromJson],
+      "groupPolicy": "allowlist",
+      "groupAllowFrom": [$groupAllowJson]
     }
   }
 "@
@@ -207,24 +296,57 @@ Write-Host "  OK" -ForegroundColor Green
 # --- 6. Build Docker image ---
 Write-Host "`n[6/$totalSteps] Building Docker image..." -ForegroundColor Yellow
 
-if (Test-Path "$OPENCLAW_REPO\Dockerfile") {
-    Write-Host "  Building image from repo (may take several minutes)..." -ForegroundColor Yellow
+# Auto-update: pull latest source before building
+if ($AUTO_UPDATE) {
+    Write-Host "  Checking for OpenClaw updates..." -ForegroundColor Yellow
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    docker build -t openclaw:local -f "$OPENCLAW_REPO\Dockerfile" $OPENCLAW_REPO 2>&1
-    $buildExitCode = $LASTEXITCODE
+    git -C $OPENCLAW_REPO pull --rebase origin main 2>&1
     $ErrorActionPreference = $prevEAP
-    if ($buildExitCode -ne 0) {
-        Write-Host "ERROR: Failed to build Docker image." -ForegroundColor Red
-        exit 1
+}
+
+if (Test-Path "$OPENCLAW_REPO\Dockerfile") {
+    # Image cache: skip build if source hasn't changed
+    $repoHash = $null
+    try { $repoHash = (git -C $OPENCLAW_REPO rev-parse HEAD 2>$null).Trim() } catch {}
+    $hashFile = "$CONFIG_DIR\.image-hash"
+    $existingHash = if (Test-Path $hashFile) { (Get-Content $hashFile -Raw).Trim() } else { "" }
+
+    if ($repoHash -and $repoHash -eq $existingHash) {
+        Write-Host "  OK - Image up to date (skipped build)" -ForegroundColor Green
+    } else {
+        Write-Host "  Building image from repo (may take several minutes)..." -ForegroundColor Yellow
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        docker build -t openclaw:local -f "$OPENCLAW_REPO\Dockerfile" $OPENCLAW_REPO 2>&1
+        $buildExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($buildExitCode -ne 0) {
+            Write-Host "ERROR: Failed to build Docker image." -ForegroundColor Red
+            exit 1
+        }
+        # Save hash for next run
+        if ($repoHash) { $repoHash | Out-File $hashFile -Encoding ascii -NoNewline }
+        Write-Host "  OK - Image 'openclaw:local' built" -ForegroundColor Green
     }
-    Write-Host "  OK - Image 'openclaw:local' built" -ForegroundColor Green
 } else {
     Write-Host "  No Dockerfile in repo - using community image" -ForegroundColor Yellow
 }
 
 # --- 7. Start Docker container ---
 Write-Host "`n[7/$totalSteps] Starting OpenClaw container..." -ForegroundColor Yellow
+
+# Port conflict check
+try {
+    $portInUse = Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue
+    if ($portInUse) {
+        $existingPid = $portInUse[0].OwningProcess
+        $proc = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -ne "com.docker.backend") {
+            Write-Host "  WARNING: Port 18789 already in use by $($proc.ProcessName) (PID $existingPid)" -ForegroundColor Yellow
+        }
+    }
+} catch {}
 
 # Stop old container if present
 try { docker stop openclaw 2>&1 | Out-Null } catch {}
@@ -238,12 +360,9 @@ if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
     $env:OPENCLAW_WORKSPACE_DIR = $WORKSPACE_DIR
     $env:OPENCLAW_GATEWAY_TOKEN = $GATEWAY_TOKEN
     $env:OPENCLAW_IMAGE = "openclaw:local"
-    # Bind Docker ports to 127.0.0.1 only (not LAN-accessible from host)
     $env:OPENCLAW_GATEWAY_PORT = "127.0.0.1:18789"
     $env:OPENCLAW_BRIDGE_PORT = "127.0.0.1:18790"
-    # Gateway listens on lan inside the container (needed for Docker port forwarding)
     $env:OPENCLAW_GATEWAY_BIND = "lan"
-    # Optional session keys (not needed for Ollama-only setup)
     if (-not $env:CLAUDE_AI_SESSION_KEY) { $env:CLAUDE_AI_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_SESSION_KEY) { $env:CLAUDE_WEB_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_COOKIE) { $env:CLAUDE_WEB_COOKIE = "" }
@@ -271,7 +390,6 @@ CLAUDE_WEB_COOKIE=
     $ErrorActionPreference = $prevEAP
     Pop-Location
 } else {
-    # Fallback: run community image directly
     Write-Host "  Using community image ghcr.io/phioranex/openclaw-docker..." -ForegroundColor Yellow
     docker run -d `
         --name openclaw `
@@ -284,7 +402,24 @@ CLAUDE_WEB_COOKIE=
         gateway start --foreground
 }
 
-Start-Sleep -Seconds 3
+# Health check: wait for gateway to accept connections
+Write-Host "  Waiting for gateway..." -ForegroundColor Yellow
+$healthy = $false
+for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $tcp.Connect("127.0.0.1", 18789)
+        $tcp.Close()
+        $healthy = $true
+        break
+    } catch {}
+}
+if ($healthy) {
+    Write-Host "  OK - Gateway healthy" -ForegroundColor Green
+} else {
+    Write-Host "  WARNING: Gateway may not be ready yet. Check logs." -ForegroundColor Yellow
+}
 
 # --- Done ---
 Write-Host "`n========================================" -ForegroundColor Green
@@ -297,7 +432,7 @@ Write-Host ""
 Write-Host "Token (save for later):" -ForegroundColor Cyan
 Write-Host "  $GATEWAY_TOKEN" -ForegroundColor White
 Write-Host ""
-Write-Host "Model: $OLLAMA_MODEL" -ForegroundColor Cyan
+Write-Host "Models: $modelList" -ForegroundColor Cyan
 Write-Host "Config: $CONFIG_DIR\openclaw.json" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "View logs:" -ForegroundColor Cyan
@@ -310,6 +445,10 @@ if ($SETUP_TELEGRAM) {
     Write-Host "  Send a message to your bot in Telegram to start chatting." -ForegroundColor White
     Write-Host ""
 }
+
+Write-Host "Quick restart (no rebuild):" -ForegroundColor Cyan
+Write-Host "  .\restart.ps1" -ForegroundColor White
+Write-Host ""
 
 # Copy URL to clipboard
 try {
