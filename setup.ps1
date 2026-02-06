@@ -5,8 +5,9 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 # Override $OLLAMA_MODELS in a wrapper script or set before dot-sourcing.
-# First model is the primary (smart); last model is used for subagents (fast).
-if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("goekdenizguelmez/JOSIEFIED-Qwen3:8b-q8_0", "qwen3:14b") }
+# First model = primary (fast, main conversation); second = subagents (smart, parallel tasks).
+# All models are JOSIEFIED (abliterated, uncensored) from goekdenizguelmez on Ollama.
+if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0", "goekdenizguelmez/JOSIEFIED-Qwen3:14b") }
 
 # --- Telegram Channel (optional) ---
 if ($null -eq $SETUP_TELEGRAM)       { $SETUP_TELEGRAM = $false }
@@ -32,35 +33,21 @@ $OPENCLAW_REPO = "$env:USERPROFILE\workspace\openclaw\openclaw"
 
 # --- Model defaults (context window / max tokens) ---
 $modelDefaults = @{
-    "qwen3:14b"    = @{ context = 131072; maxTokens = 8192 }
-    "qwen3:32b"    = @{ context = 131072; maxTokens = 8192 }
-    "qwen3:8b"     = @{ context = 131072; maxTokens = 8192 }
-    "llama3.1:8b"  = @{ context = 131072; maxTokens = 4096 }
-    "llama3.1:70b" = @{ context = 131072; maxTokens = 4096 }
-    "mistral:7b"   = @{ context = 32768;  maxTokens = 4096 }
-    "gemma2:9b"    = @{ context = 8192;   maxTokens = 4096 }
-    "gemma2:27b"        = @{ context = 8192;   maxTokens = 4096 }
-    "dolphin-mistral:7b"          = @{ context = 32768;  maxTokens = 4096 }
-    "wizard-vicuna-uncensored:13b" = @{ context = 32768;  maxTokens = 4096 }
-    "hermes3:8b"                   = @{ context = 131072; maxTokens = 4096 }
+    "goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0" = @{ context = 131072; maxTokens = 8192 }
     "goekdenizguelmez/JOSIEFIED-Qwen3:8b-q8_0" = @{ context = 131072; maxTokens = 8192 }
+    "goekdenizguelmez/JOSIEFIED-Qwen3:14b"     = @{ context = 131072; maxTokens = 8192 }
+    "qwen3:14b"    = @{ context = 131072; maxTokens = 8192 }
+    "qwen3:8b"     = @{ context = 131072; maxTokens = 8192 }
 }
 $defaultModelSpec = @{ context = 32768; maxTokens = 4096 }
 
 # --- Model aliases (for /model command in chat) ---
 $modelAliases = @{
-    "qwen3:14b"    = "smart"
-    "qwen3:32b"    = "smart"
-    "qwen3:8b"     = "fast"
-    "llama3.1:8b"  = "fast"
-    "llama3.1:70b" = "smart"
-    "mistral:7b"        = "fast"
-    "gemma2:9b"         = "fast"
-    "gemma2:27b"        = "smart"
-    "dolphin-mistral:7b"          = "uncensored"
-    "wizard-vicuna-uncensored:13b" = "uncensored"
-    "hermes3:8b"                   = "fast"
+    "goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0" = "fast"
     "goekdenizguelmez/JOSIEFIED-Qwen3:8b-q8_0" = "fast"
+    "goekdenizguelmez/JOSIEFIED-Qwen3:14b"     = "smart"
+    "qwen3:14b"    = "smart"
+    "qwen3:8b"     = "fast"
 }
 
 # --- Persist gateway token across runs ---
