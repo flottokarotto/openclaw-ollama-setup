@@ -238,10 +238,9 @@ if ($BRAVE_SEARCH_API_KEY) {
   "tools": {
     "web": {
       "search": {
+        "enabled": true,
         "provider": "brave",
-        "brave": {
-          "apiKey": "$BRAVE_SEARCH_API_KEY"
-        }
+        "apiKey": "$BRAVE_SEARCH_API_KEY"
       }
     }
   }
