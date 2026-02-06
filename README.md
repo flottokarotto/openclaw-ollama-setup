@@ -34,11 +34,9 @@ cd ~/workspace/openclaw
 # git submodule update --init
 
 # 2. Make sure Docker Desktop and Ollama are running
-#    (start Ollama with 0.0.0.0 binding for Docker access)
-$env:OLLAMA_HOST = "0.0.0.0:11434"
 ollama serve
 
-# 4. Run setup (in a new terminal)
+# 3. Run setup (in a new terminal)
 .\setup.ps1
 ```
 
@@ -119,12 +117,7 @@ If installed elsewhere, add it to your PATH or edit the `$candidates` array in t
 
 ### Docker can't reach Ollama
 
-Ollama must listen on `0.0.0.0` (not just `127.0.0.1`) for Docker to connect via `host.docker.internal`:
-
-```powershell
-$env:OLLAMA_HOST = "0.0.0.0:11434"
-ollama serve
-```
+Docker Desktop for Windows routes `host.docker.internal` to the host's localhost automatically, so Ollama works with its default `127.0.0.1` binding. Make sure Ollama is running (`ollama serve`) and check the container logs for connection errors.
 
 ### Gateway config invalid
 
@@ -169,13 +162,7 @@ docker compose -f openclaw/docker-compose.yml down
 - **Ports bound to localhost only** -- Docker maps ports to `127.0.0.1` on the host, so the dashboard is not reachable from the LAN. The gateway uses `bind: lan` inside the container (required for Docker port forwarding to work).
 - **Token is generated with CSPRNG** -- uses `System.Security.Cryptography.RandomNumberGenerator`, not `Get-Random`.
 - **Device pairing required** -- new browsers must be explicitly approved before they can connect.
-- **Ollama has no built-in auth** -- when binding to `0.0.0.0` (needed for Docker), Ollama is reachable from the LAN. Add a firewall rule to block external access:
-
-```powershell
-New-NetFirewallRule -DisplayName "Ollama - Block LAN" `
-  -Direction Inbound -LocalPort 11434 -Protocol TCP `
-  -RemoteAddress LocalSubnet -Action Block
-```
+- **Ollama stays on localhost** -- Docker Desktop routes `host.docker.internal` to the host's `127.0.0.1`, so Ollama does not need to bind to `0.0.0.0` and is not exposed to the LAN.
 
 ## License
 

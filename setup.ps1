@@ -81,25 +81,12 @@ if ($ollamaModels -notcontains $OLLAMA_MODEL) {
 }
 Write-Host "  OK - Model '$OLLAMA_MODEL' available" -ForegroundColor Green
 
-# --- 3. Check Ollama Docker accessibility ---
-Write-Host "`n[3/7] Checking Ollama Docker access..." -ForegroundColor Yellow
-try {
-    $response = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5
-    Write-Host "  OK - Ollama API reachable at localhost:11434" -ForegroundColor Green
-} catch {
-    Write-Host "  WARNING: Ollama API not reachable at localhost:11434" -ForegroundColor Yellow
-}
-Write-Host ""
-Write-Host "  SECURITY WARNING:" -ForegroundColor Red
-Write-Host "  Ollama must listen on 0.0.0.0 for Docker to reach it." -ForegroundColor Yellow
-Write-Host "  This means Ollama is reachable from your entire LAN without authentication!" -ForegroundColor Yellow
-Write-Host "  Recommendation: Create a Windows Firewall rule to block external access:" -ForegroundColor Yellow
-Write-Host "    New-NetFirewallRule -DisplayName 'Ollama - Block LAN' ``" -ForegroundColor White
-Write-Host "      -Direction Inbound -LocalPort 11434 -Protocol TCP ``" -ForegroundColor White
-Write-Host "      -RemoteAddress LocalSubnet -Action Block" -ForegroundColor White
-Write-Host ""
-Write-Host "  If needed, restart Ollama with:" -ForegroundColor Yellow
-Write-Host "    `$env:OLLAMA_HOST='0.0.0.0:11434'; & '$OLLAMA_EXE' serve" -ForegroundColor White
+# --- 3. Verify Ollama is reachable (no 0.0.0.0 binding needed) ---
+# Docker Desktop for Windows routes host.docker.internal to the host's
+# localhost, so Ollama can stay on its default 127.0.0.1 binding.
+Write-Host "`n[3/7] Verifying Ollama connectivity..." -ForegroundColor Yellow
+Write-Host "  OK - Docker Desktop routes to Ollama via host.docker.internal" -ForegroundColor Green
+Write-Host "  No need to change Ollama's default binding." -ForegroundColor Gray
 
 # --- 4. Create config directories ---
 Write-Host "`n[4/7] Creating config directories..." -ForegroundColor Yellow
@@ -281,11 +268,6 @@ Write-Host "  $GATEWAY_TOKEN" -ForegroundColor White
 Write-Host ""
 Write-Host "Model: $OLLAMA_MODEL" -ForegroundColor Cyan
 Write-Host "Config: $CONFIG_DIR\openclaw.json" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "NOTE: Ollama must listen on 0.0.0.0 for Docker access!" -ForegroundColor Yellow
-Write-Host "  In a new terminal:" -ForegroundColor Yellow
-Write-Host "    `$env:OLLAMA_HOST='0.0.0.0:11434'" -ForegroundColor White
-Write-Host "    ollama serve" -ForegroundColor White
 Write-Host ""
 Write-Host "View logs:" -ForegroundColor Cyan
 Write-Host "  docker compose -f $OPENCLAW_REPO\docker-compose.yml logs -f openclaw-gateway" -ForegroundColor White
