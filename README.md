@@ -21,19 +21,19 @@ The `setup.ps1` script automates the entire setup process:
 | **Windows 10/11** | PowerShell 5.1+ |
 | **Docker Desktop** | Must be running before setup |
 | **Ollama** | [Download](https://ollama.com/download) and start with `ollama serve` |
-| **OpenClaw repo** | Cloned to `~/workspace/openclaw/openclaw` (see below) |
+| **OpenClaw repo** | Included as git submodule |
 
 ## Quick Start
 
 ```powershell
-# 1. Clone this repo
-git clone https://github.com/flottokarotto/openclaw-ollama-setup.git ~/workspace/openclaw
+# 1. Clone this repo (with submodule)
+git clone --recurse-submodules https://github.com/flottokarotto/openclaw-ollama-setup.git ~/workspace/openclaw
 cd ~/workspace/openclaw
 
-# 2. Clone the OpenClaw repo
-git clone https://github.com/openclaw/openclaw.git openclaw
+# If already cloned without --recurse-submodules:
+# git submodule update --init
 
-# 3. Make sure Docker Desktop and Ollama are running
+# 2. Make sure Docker Desktop and Ollama are running
 #    (start Ollama with 0.0.0.0 binding for Docker access)
 $env:OLLAMA_HOST = "0.0.0.0:11434"
 ollama serve
