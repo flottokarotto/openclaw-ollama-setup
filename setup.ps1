@@ -1,11 +1,11 @@
 # OpenClaw + Ollama Setup Script for Windows
-# Voraussetzungen: Docker Desktop laeuft, Ollama installiert
+# Prerequisites: Docker Desktop running, Ollama installed
 
 $ErrorActionPreference = "Stop"
 
-# --- Konfiguration ---
+# --- Configuration ---
 $OLLAMA_MODEL = "qwen3:14b"
-# Kryptografisch sicheren Token generieren (CSPRNG)
+# Generate cryptographically secure token (CSPRNG)
 $tokenBytes = New-Object byte[] 32
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
 $GATEWAY_TOKEN = [BitConverter]::ToString($tokenBytes).Replace("-", "").ToLower()
@@ -13,14 +13,12 @@ $CONFIG_DIR = "$env:USERPROFILE\.openclaw"
 $WORKSPACE_DIR = "$CONFIG_DIR\workspace"
 $OPENCLAW_REPO = "$env:USERPROFILE\workspace\openclaw\openclaw"
 
-# --- Ollama-Pfad ermitteln ---
+# --- Detect Ollama installation ---
 $OLLAMA_EXE = $null
-# Zuerst im PATH suchen
 $ollamaInPath = Get-Command ollama -ErrorAction SilentlyContinue
 if ($ollamaInPath) {
     $OLLAMA_EXE = $ollamaInPath.Source
 } else {
-    # Standard-Installationspfade pruefen
     $candidates = @(
         "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
         "$env:ProgramFiles\Ollama\ollama.exe",
@@ -34,86 +32,84 @@ if ($ollamaInPath) {
     }
 }
 if (-not $OLLAMA_EXE) {
-    Write-Host "FEHLER: Ollama nicht gefunden. Bitte installieren oder Pfad pruefen." -ForegroundColor Red
+    Write-Host "ERROR: Ollama not found. Please install it or check the path." -ForegroundColor Red
     exit 1
 }
-Write-Host "Ollama gefunden: $OLLAMA_EXE" -ForegroundColor Gray
+Write-Host "Ollama found: $OLLAMA_EXE" -ForegroundColor Gray
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " OpenClaw + Ollama Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# --- 1. Pruefen ob Docker laeuft ---
-Write-Host "`n[1/7] Pruefe Docker..." -ForegroundColor Yellow
+# --- 1. Check if Docker is running ---
+Write-Host "`n[1/7] Checking Docker..." -ForegroundColor Yellow
 try {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     docker info 2>&1 | Out-Null
     $ErrorActionPreference = $prevEAP
-    if ($LASTEXITCODE -ne 0) { throw "Docker nicht erreichbar" }
+    if ($LASTEXITCODE -ne 0) { throw "Docker not reachable" }
 } catch {
     $ErrorActionPreference = $prevEAP
-    Write-Host "FEHLER: Docker laeuft nicht. Starte Docker Desktop zuerst." -ForegroundColor Red
+    Write-Host "ERROR: Docker is not running. Start Docker Desktop first." -ForegroundColor Red
     exit 1
 }
 Write-Host "  OK" -ForegroundColor Green
 
-# --- 2. Pruefen ob Ollama laeuft und Model pullen ---
-Write-Host "`n[2/7] Pruefe Ollama und pull Model '$OLLAMA_MODEL'..." -ForegroundColor Yellow
+# --- 2. Check if Ollama is running and pull model ---
+Write-Host "`n[2/7] Checking Ollama and pulling model '$OLLAMA_MODEL'..." -ForegroundColor Yellow
 try {
-    # Ollama API direkt pruefen (PATH-unabhaengig)
     $tagsResponse = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5
     $ollamaModels = ($tagsResponse.Content | ConvertFrom-Json).models.name
 } catch {
-    Write-Host "FEHLER: Ollama laeuft nicht (API auf localhost:11434 nicht erreichbar)." -ForegroundColor Red
-    Write-Host "  Starte Ollama zuerst: & '$OLLAMA_EXE' serve" -ForegroundColor Yellow
+    Write-Host "ERROR: Ollama is not running (API at localhost:11434 not reachable)." -ForegroundColor Red
+    Write-Host "  Start Ollama first: & '$OLLAMA_EXE' serve" -ForegroundColor Yellow
     exit 1
 }
 
-# Model pullen falls nicht vorhanden
+# Pull model if not available
 if ($ollamaModels -notcontains $OLLAMA_MODEL) {
-    Write-Host "  Model wird heruntergeladen (kann dauern)..." -ForegroundColor Yellow
+    Write-Host "  Downloading model (this may take a while)..." -ForegroundColor Yellow
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & $OLLAMA_EXE pull $OLLAMA_MODEL 2>&1
     $ErrorActionPreference = $prevEAP
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "FEHLER: Model konnte nicht geladen werden." -ForegroundColor Red
+        Write-Host "ERROR: Failed to download model." -ForegroundColor Red
         exit 1
     }
 }
-Write-Host "  OK - Model '$OLLAMA_MODEL' verfuegbar" -ForegroundColor Green
+Write-Host "  OK - Model '$OLLAMA_MODEL' available" -ForegroundColor Green
 
-# --- 3. Pruefen ob Ollama fuer Docker erreichbar ist ---
-Write-Host "`n[3/7] Pruefe Ollama Docker-Zugriff..." -ForegroundColor Yellow
+# --- 3. Check Ollama Docker accessibility ---
+Write-Host "`n[3/7] Checking Ollama Docker access..." -ForegroundColor Yellow
 try {
     $response = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5
-    Write-Host "  OK - Ollama API erreichbar auf localhost:11434" -ForegroundColor Green
+    Write-Host "  OK - Ollama API reachable at localhost:11434" -ForegroundColor Green
 } catch {
-    Write-Host "  WARNUNG: Ollama API nicht erreichbar auf localhost:11434" -ForegroundColor Yellow
+    Write-Host "  WARNING: Ollama API not reachable at localhost:11434" -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "  SICHERHEITSHINWEIS:" -ForegroundColor Red
-Write-Host "  Ollama muss auf 0.0.0.0 lauschen, damit Docker darauf zugreifen kann." -ForegroundColor Yellow
-Write-Host "  Das bedeutet: Ollama ist im gesamten LAN ohne Passwort erreichbar!" -ForegroundColor Yellow
-Write-Host "  Empfehlung: Windows-Firewall Regel erstellen, die Port 11434" -ForegroundColor Yellow
-Write-Host "  nur fuer lokale Verbindungen erlaubt:" -ForegroundColor Yellow
+Write-Host "  SECURITY WARNING:" -ForegroundColor Red
+Write-Host "  Ollama must listen on 0.0.0.0 for Docker to reach it." -ForegroundColor Yellow
+Write-Host "  This means Ollama is reachable from your entire LAN without authentication!" -ForegroundColor Yellow
+Write-Host "  Recommendation: Create a Windows Firewall rule to block external access:" -ForegroundColor Yellow
 Write-Host "    New-NetFirewallRule -DisplayName 'Ollama - Block LAN' ``" -ForegroundColor White
 Write-Host "      -Direction Inbound -LocalPort 11434 -Protocol TCP ``" -ForegroundColor White
 Write-Host "      -RemoteAddress LocalSubnet -Action Block" -ForegroundColor White
 Write-Host ""
-Write-Host "  Falls noetig, Ollama neu starten mit:" -ForegroundColor Yellow
+Write-Host "  If needed, restart Ollama with:" -ForegroundColor Yellow
 Write-Host "    `$env:OLLAMA_HOST='0.0.0.0:11434'; & '$OLLAMA_EXE' serve" -ForegroundColor White
 
-# --- 4. Config-Verzeichnisse erstellen ---
-Write-Host "`n[4/7] Erstelle Config-Verzeichnisse..." -ForegroundColor Yellow
+# --- 4. Create config directories ---
+Write-Host "`n[4/7] Creating config directories..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $WORKSPACE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path "$CONFIG_DIR\canvas" | Out-Null
 Write-Host "  OK - $CONFIG_DIR" -ForegroundColor Green
 
-# --- 5. openclaw.json schreiben ---
-Write-Host "`n[5/7] Schreibe openclaw.json..." -ForegroundColor Yellow
+# --- 5. Write openclaw.json ---
+Write-Host "`n[5/7] Writing openclaw.json..." -ForegroundColor Yellow
 
 $config = @"
 {
@@ -190,38 +186,36 @@ $config = @"
 $config | Out-File -FilePath "$CONFIG_DIR\openclaw.json" -Encoding utf8
 Write-Host "  OK" -ForegroundColor Green
 
-# --- 6. Docker Image bauen ---
-Write-Host "`n[6/7] Baue Docker Image..." -ForegroundColor Yellow
+# --- 6. Build Docker image ---
+Write-Host "`n[6/7] Building Docker image..." -ForegroundColor Yellow
 
-# Pruefe ob Repo mit Dockerfile vorhanden ist
 if (Test-Path "$OPENCLAW_REPO\Dockerfile") {
-    Write-Host "  Baue Image aus Repo (kann einige Minuten dauern)..." -ForegroundColor Yellow
+    Write-Host "  Building image from repo (may take several minutes)..." -ForegroundColor Yellow
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     docker build -t openclaw:local -f "$OPENCLAW_REPO\Dockerfile" $OPENCLAW_REPO 2>&1
     $buildExitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     if ($buildExitCode -ne 0) {
-        Write-Host "FEHLER: Docker Image konnte nicht gebaut werden." -ForegroundColor Red
+        Write-Host "ERROR: Failed to build Docker image." -ForegroundColor Red
         exit 1
     }
-    Write-Host "  OK - Image 'openclaw:local' gebaut" -ForegroundColor Green
+    Write-Host "  OK - Image 'openclaw:local' built" -ForegroundColor Green
 } else {
-    Write-Host "  Kein Dockerfile im Repo - nutze Community-Image" -ForegroundColor Yellow
+    Write-Host "  No Dockerfile in repo - using community image" -ForegroundColor Yellow
 }
 
-# --- 7. Docker Container starten ---
-Write-Host "`n[7/7] Starte OpenClaw Container..." -ForegroundColor Yellow
+# --- 7. Start Docker container ---
+Write-Host "`n[7/7] Starting OpenClaw container..." -ForegroundColor Yellow
 
-# Alten Container stoppen falls vorhanden
+# Stop old container if present
 try { docker stop openclaw 2>&1 | Out-Null } catch {}
 try { docker rm openclaw 2>&1 | Out-Null } catch {}
 
-# Pruefe ob Repo mit docker-compose vorhanden ist
 if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
-    Write-Host "  Nutze docker-compose aus Repo..." -ForegroundColor Yellow
+    Write-Host "  Using docker-compose from repo..." -ForegroundColor Yellow
 
-    # Environment-Variablen fuer docker-compose setzen
+    # Set environment variables for docker-compose
     $env:OPENCLAW_CONFIG_DIR = $CONFIG_DIR
     $env:OPENCLAW_WORKSPACE_DIR = $WORKSPACE_DIR
     $env:OPENCLAW_GATEWAY_TOKEN = $GATEWAY_TOKEN
@@ -229,12 +223,12 @@ if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
     $env:OPENCLAW_GATEWAY_PORT = "18789"
     $env:OPENCLAW_BRIDGE_PORT = "18790"
     $env:OPENCLAW_GATEWAY_BIND = "loopback"
-    # Optionale Session-Keys (nicht benoetigt fuer Ollama-only Setup)
+    # Optional session keys (not needed for Ollama-only setup)
     if (-not $env:CLAUDE_AI_SESSION_KEY) { $env:CLAUDE_AI_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_SESSION_KEY) { $env:CLAUDE_WEB_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_COOKIE) { $env:CLAUDE_WEB_COOKIE = "" }
 
-    # .env Datei fuer docker-compose erstellen
+    # Create .env file for docker-compose
     $envContent = @"
 OPENCLAW_CONFIG_DIR=$CONFIG_DIR
 OPENCLAW_WORKSPACE_DIR=$WORKSPACE_DIR
@@ -250,8 +244,6 @@ CLAUDE_WEB_COOKIE=
     $envContent | Out-File -FilePath "$OPENCLAW_REPO\.env" -Encoding ascii -NoNewline
 
     Push-Location $OPENCLAW_REPO
-    # ErrorActionPreference temporaer auf Continue setzen
-    # da docker compose Warnungen auf stderr ausgibt
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     docker compose down 2>&1 | Out-Null
@@ -259,8 +251,8 @@ CLAUDE_WEB_COOKIE=
     $ErrorActionPreference = $prevEAP
     Pop-Location
 } else {
-    # Fallback: Community-Image direkt starten
-    Write-Host "  Nutze Community-Image ghcr.io/phioranex/openclaw-docker..." -ForegroundColor Yellow
+    # Fallback: run community image directly
+    Write-Host "  Using community image ghcr.io/phioranex/openclaw-docker..." -ForegroundColor Yellow
     docker run -d `
         --name openclaw `
         --restart unless-stopped `
@@ -274,32 +266,32 @@ CLAUDE_WEB_COOKIE=
 
 Start-Sleep -Seconds 3
 
-# --- Fertig ---
+# --- Done ---
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host " Setup abgeschlossen!" -ForegroundColor Green
+Write-Host " Setup complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Dashboard URL:" -ForegroundColor Cyan
 Write-Host "  http://127.0.0.1:18789/?token=$GATEWAY_TOKEN" -ForegroundColor White
 Write-Host ""
-Write-Host "Token (fuer spaeter):" -ForegroundColor Cyan
+Write-Host "Token (save for later):" -ForegroundColor Cyan
 Write-Host "  $GATEWAY_TOKEN" -ForegroundColor White
 Write-Host ""
 Write-Host "Model: $OLLAMA_MODEL" -ForegroundColor Cyan
 Write-Host "Config: $CONFIG_DIR\openclaw.json" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "WICHTIG: Ollama muss auf 0.0.0.0 lauschen!" -ForegroundColor Yellow
-Write-Host "  In neuem Terminal:" -ForegroundColor Yellow
-Write-Host "    set OLLAMA_HOST=0.0.0.0:11434" -ForegroundColor White
+Write-Host "NOTE: Ollama must listen on 0.0.0.0 for Docker access!" -ForegroundColor Yellow
+Write-Host "  In a new terminal:" -ForegroundColor Yellow
+Write-Host "    `$env:OLLAMA_HOST='0.0.0.0:11434'" -ForegroundColor White
 Write-Host "    ollama serve" -ForegroundColor White
 Write-Host ""
-Write-Host "Logs anzeigen:" -ForegroundColor Cyan
+Write-Host "View logs:" -ForegroundColor Cyan
 Write-Host "  docker compose -f $OPENCLAW_REPO\docker-compose.yml logs -f openclaw-gateway" -ForegroundColor White
-Write-Host "  (oder: docker logs -f openclaw)" -ForegroundColor Gray
+Write-Host "  (or: docker logs -f openclaw)" -ForegroundColor Gray
 Write-Host ""
 
-# URL in Zwischenablage kopieren
+# Copy URL to clipboard
 try {
     "http://127.0.0.1:18789/?token=$GATEWAY_TOKEN" | Set-Clipboard
-    Write-Host "(Dashboard-URL in Zwischenablage kopiert)" -ForegroundColor Gray
+    Write-Host "(Dashboard URL copied to clipboard)" -ForegroundColor Gray
 } catch {}
