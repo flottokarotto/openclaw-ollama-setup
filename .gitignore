@@ -1,0 +1,21 @@
+# OpenClaw repo (separate project, cloned by user)
+openclaw/
+
+# Environment files with secrets
+.env
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
