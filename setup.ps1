@@ -5,14 +5,21 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 # Override $OLLAMA_MODELS in a wrapper script or set before dot-sourcing.
-# First model is the primary; all are registered in the config.
-if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:14b") }
+# First model is the primary (smart); last model is used for subagents (fast).
+if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:14b", "llama3.1:8b") }
 
 # --- Telegram Channel (optional) ---
 if ($null -eq $SETUP_TELEGRAM)       { $SETUP_TELEGRAM = $false }
 if (-not $TELEGRAM_BOT_TOKEN)        { $TELEGRAM_BOT_TOKEN = "" }
 if (-not $TELEGRAM_ALLOW_FROM)       { $TELEGRAM_ALLOW_FROM = @() }
 if (-not $TELEGRAM_GROUP_ALLOW)      { $TELEGRAM_GROUP_ALLOW = @() }
+
+# --- Brave Search (optional) ---
+if (-not $BRAVE_SEARCH_API_KEY) { $BRAVE_SEARCH_API_KEY = "" }
+
+# --- GitHub (optional) ---
+if ($null -eq $SETUP_GITHUB) { $SETUP_GITHUB = $false }
+if (-not $GITHUB_TOKEN)      { $GITHUB_TOKEN = "" }
 
 # --- Advanced options ---
 if ($null -eq $AUTO_UPDATE)              { $AUTO_UPDATE = $false }
@@ -35,6 +42,18 @@ $modelDefaults = @{
     "gemma2:27b"   = @{ context = 8192;   maxTokens = 4096 }
 }
 $defaultModelSpec = @{ context = 32768; maxTokens = 4096 }
+
+# --- Model aliases (for /model command in chat) ---
+$modelAliases = @{
+    "qwen3:14b"    = "smart"
+    "qwen3:32b"    = "smart"
+    "qwen3:8b"     = "fast"
+    "llama3.1:8b"  = "fast"
+    "llama3.1:70b" = "smart"
+    "mistral:7b"   = "fast"
+    "gemma2:9b"    = "fast"
+    "gemma2:27b"   = "smart"
+}
 
 # --- Persist gateway token across runs ---
 $GATEWAY_TOKEN = ""
@@ -80,8 +99,10 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " OpenClaw + Ollama Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-if ($SETUP_TELEGRAM) { Write-Host "Telegram channel enabled" -ForegroundColor Gray }
-if ($AUTO_UPDATE)    { Write-Host "Auto-update enabled" -ForegroundColor Gray }
+if ($SETUP_TELEGRAM)     { Write-Host "Telegram channel enabled" -ForegroundColor Gray }
+if ($BRAVE_SEARCH_API_KEY) { Write-Host "Brave Search enabled" -ForegroundColor Gray }
+if ($SETUP_GITHUB)       { Write-Host "GitHub CLI enabled" -ForegroundColor Gray }
+if ($AUTO_UPDATE)        { Write-Host "Auto-update enabled" -ForegroundColor Gray }
 
 $totalSteps = 7
 
@@ -198,14 +219,34 @@ foreach ($model in $OLLAMA_MODELS) {
 }
 $modelsJson = $modelsJsonArray -join ",`n"
 
-# Build agent model aliases
+# Build agent model aliases (use lookup table, fallback to model name)
 $aliasEntries = @()
 foreach ($model in $OLLAMA_MODELS) {
-    $isFirst = ($model -eq $primaryModel)
-    $aliasName = if ($isFirst) { "Local Ollama" } else { $model }
+    $aliasName = if ($modelAliases.ContainsKey($model)) { $modelAliases[$model] } else { $model }
     $aliasEntries += "        `"ollama/$model`": { `"alias`": `"$aliasName`" }"
 }
 $aliasJson = $aliasEntries -join ",`n"
+
+# Subagent model: use the last model (typically the fastest/smallest)
+$subagentModel = if ($OLLAMA_MODELS.Count -gt 1) { $OLLAMA_MODELS[-1] } else { $primaryModel }
+
+# Build tools config (Brave Search)
+$toolsBlock = ""
+if ($BRAVE_SEARCH_API_KEY) {
+    $toolsBlock = @"
+,
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "brave": {
+          "apiKey": "$BRAVE_SEARCH_API_KEY"
+        }
+      }
+    }
+  }
+"@
+}
 
 $config = @"
 {
@@ -216,7 +257,8 @@ $config = @"
     "defaults": {
       "maxConcurrent": 4,
       "subagents": {
-        "maxConcurrent": 8
+        "maxConcurrent": 8,
+        "model": "ollama/$subagentModel"
       },
       "compaction": {
         "mode": "safeguard"
@@ -241,7 +283,7 @@ $modelsJson
         ]
       }
     }
-  },
+  }$toolsBlock,
   "gateway": {
     "mode": "local",
     "auth": {
@@ -305,28 +347,41 @@ if ($AUTO_UPDATE) {
     $ErrorActionPreference = $prevEAP
 }
 
+# Determine extra apt packages for Docker build
+$aptPackages = @()
+if ($SETUP_GITHUB) { $aptPackages += "gh" }
+$aptPackagesStr = $aptPackages -join " "
+
 if (Test-Path "$OPENCLAW_REPO\Dockerfile") {
-    # Image cache: skip build if source hasn't changed
+    # Image cache: skip build if source + build args haven't changed
     $repoHash = $null
     try { $repoHash = (git -C $OPENCLAW_REPO rev-parse HEAD 2>$null).Trim() } catch {}
+    $cacheKey = "$repoHash|apt=$aptPackagesStr"
     $hashFile = "$CONFIG_DIR\.image-hash"
     $existingHash = if (Test-Path $hashFile) { (Get-Content $hashFile -Raw).Trim() } else { "" }
 
-    if ($repoHash -and $repoHash -eq $existingHash) {
+    if ($cacheKey -and $cacheKey -eq $existingHash) {
         Write-Host "  OK - Image up to date (skipped build)" -ForegroundColor Green
     } else {
         Write-Host "  Building image from repo (may take several minutes)..." -ForegroundColor Yellow
+        $buildArgs = @("-t", "openclaw:local", "-f", "$OPENCLAW_REPO\Dockerfile")
+        if ($aptPackagesStr) {
+            $buildArgs += "--build-arg"
+            $buildArgs += "OPENCLAW_DOCKER_APT_PACKAGES=$aptPackagesStr"
+            Write-Host "  Extra packages: $aptPackagesStr" -ForegroundColor Gray
+        }
+        $buildArgs += $OPENCLAW_REPO
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        docker build -t openclaw:local -f "$OPENCLAW_REPO\Dockerfile" $OPENCLAW_REPO 2>&1
+        docker build @buildArgs 2>&1
         $buildExitCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
         if ($buildExitCode -ne 0) {
             Write-Host "ERROR: Failed to build Docker image." -ForegroundColor Red
             exit 1
         }
-        # Save hash for next run
-        if ($repoHash) { $repoHash | Out-File $hashFile -Encoding ascii -NoNewline }
+        # Save cache key for next run
+        if ($cacheKey) { $cacheKey | Out-File $hashFile -Encoding ascii -NoNewline }
         Write-Host "  OK - Image 'openclaw:local' built" -ForegroundColor Green
     }
 } else {
@@ -366,6 +421,7 @@ if (Test-Path "$OPENCLAW_REPO\docker-compose.yml") {
     if (-not $env:CLAUDE_AI_SESSION_KEY) { $env:CLAUDE_AI_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_SESSION_KEY) { $env:CLAUDE_WEB_SESSION_KEY = "" }
     if (-not $env:CLAUDE_WEB_COOKIE) { $env:CLAUDE_WEB_COOKIE = "" }
+    if ($GITHUB_TOKEN) { $env:GH_TOKEN = $GITHUB_TOKEN }
 
     # Create .env file for docker-compose
     $envContent = @"
@@ -380,6 +436,7 @@ CLAUDE_AI_SESSION_KEY=
 CLAUDE_WEB_SESSION_KEY=
 CLAUDE_WEB_COOKIE=
 "@
+    if ($GITHUB_TOKEN) { $envContent += "`nGH_TOKEN=$GITHUB_TOKEN" }
     $envContent | Out-File -FilePath "$OPENCLAW_REPO\.env" -Encoding ascii -NoNewline
 
     Push-Location $OPENCLAW_REPO
@@ -439,6 +496,27 @@ Write-Host "View logs:" -ForegroundColor Cyan
 Write-Host "  docker compose -f $OPENCLAW_REPO\docker-compose.yml logs -f openclaw-gateway" -ForegroundColor White
 Write-Host "  (or: docker logs -f openclaw)" -ForegroundColor Gray
 Write-Host ""
+
+if ($OLLAMA_MODELS.Count -gt 1) {
+    Write-Host "Model aliases (use /model in chat):" -ForegroundColor Cyan
+    foreach ($m in $OLLAMA_MODELS) {
+        $a = if ($modelAliases.ContainsKey($m)) { $modelAliases[$m] } else { $m }
+        $role = if ($m -eq $primaryModel) { " (primary)" } elseif ($m -eq $subagentModel) { " (subagents)" } else { "" }
+        Write-Host "  /model $a  ->  $m$role" -ForegroundColor White
+    }
+    Write-Host ""
+}
+
+if ($BRAVE_SEARCH_API_KEY) {
+    Write-Host "Web Search: Brave Search enabled" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+if ($SETUP_GITHUB) {
+    Write-Host "GitHub: gh CLI installed in container" -ForegroundColor Cyan
+    if ($GITHUB_TOKEN) { Write-Host "  GH_TOKEN set" -ForegroundColor Gray }
+    Write-Host ""
+}
 
 if ($SETUP_TELEGRAM) {
     Write-Host "Telegram Bot:" -ForegroundColor Cyan

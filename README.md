@@ -54,24 +54,33 @@ Edit the variables at the top of `setup.ps1` or override them in a wrapper scrip
 
 | Variable | Default | Description |
 |---|---|---|
-| `$OLLAMA_MODELS` | `@("qwen3:14b")` | Ollama models to register (first = primary) |
+| `$OLLAMA_MODELS` | `@("qwen3:14b", "llama3.1:8b")` | Ollama models (first = primary "smart", last = subagent "fast") |
 | `$SETUP_TELEGRAM` | `$false` | Enable Telegram channel |
 | `$TELEGRAM_BOT_TOKEN` | `""` | Bot token from @BotFather |
 | `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs (DMs) |
 | `$TELEGRAM_GROUP_ALLOW` | `@()` | Allowed Telegram group IDs |
+| `$BRAVE_SEARCH_API_KEY` | `""` | Brave Search API key for web search |
+| `$SETUP_GITHUB` | `$false` | Install GitHub CLI (`gh`) in the container |
+| `$GITHUB_TOKEN` | `""` | GitHub personal access token for `gh` |
 | `$AUTO_UPDATE` | `$false` | Pull latest OpenClaw source before building |
 | `$INTERACTIVE_MODEL_SELECT` | `$false` | Show model picker during setup |
 
-### Multiple models
+### Multiple models and aliases
 
-Register several models so you can switch between them in the dashboard:
+By default, two models are registered:
+- **`qwen3:14b`** — primary model (alias: `smart`), used for main conversations
+- **`llama3.1:8b`** — fast model (alias: `fast`), used automatically for subagent tasks
+
+Switch models in chat with `/model smart` or `/model fast`. Subagents (parallel helper tasks) always use the fast model automatically.
+
+Register additional models:
 
 ```powershell
 $OLLAMA_MODELS = @("qwen3:14b", "llama3.1:8b", "mistral:7b")
 .\setup.ps1
 ```
 
-All models are pulled automatically and registered in the config. The first model is the primary.
+All models are pulled automatically. The first model is the primary, the last is used for subagents.
 
 ### Interactive model selection
 
@@ -102,6 +111,29 @@ Set `$AUTO_UPDATE = $true` to pull the latest OpenClaw source before building. T
 $AUTO_UPDATE = $true
 .\setup.ps1
 ```
+
+## Brave Search (optional)
+
+Give OpenClaw the ability to search the web. Get a free API key (2,000 queries/month) from [brave.com/search/api](https://brave.com/search/api).
+
+```powershell
+$BRAVE_SEARCH_API_KEY = "BSA..."
+.\setup.ps1
+```
+
+Or add it to your wrapper script (e.g. `run-telegram.ps1`).
+
+## GitHub (optional)
+
+Install the GitHub CLI (`gh`) in the container so OpenClaw can interact with repositories, issues, and pull requests.
+
+```powershell
+$SETUP_GITHUB = $true
+$GITHUB_TOKEN = "ghp_..."    # Personal access token from github.com/settings/tokens
+.\setup.ps1
+```
+
+This adds `gh` to the Docker image via `OPENCLAW_DOCKER_APT_PACKAGES` (triggers a one-time rebuild). The token is passed as `GH_TOKEN` environment variable.
 
 ## Telegram Channel (optional)
 
@@ -136,27 +168,31 @@ To find a group ID, add the bot to the group and check the gateway logs.
 ## Architecture
 
 ```
-                    +------------------+
-                    |    Browser       |
-                    |  (Dashboard UI)  |
-                    +--------+---------+
-                             |
-                             | WebSocket :18789
-                             |
-                    +--------+---------+
-                    |   OpenClaw       |
-                    |   Gateway        |
-                    |   (Docker)       |
-                    +--------+---------+
-                             |
-                             | OpenAI-compat API
-                             | host.docker.internal:11434
-                             |
-                    +--------+---------+
-                    |    Ollama        |
-                    |    (Host)        |
-                    |  qwen3:14b       |
-                    +------------------+
+  +----------+    +----------+
+  | Browser  |    | Telegram |
+  | (Dashboard)   | Bot      |
+  +----+-----+    +----+-----+
+       |               |
+       +-------+-------+
+               |
+               | WebSocket :18789
+               |
+      +--------+---------+          +------------------+
+      |   OpenClaw       |--gh----->|    GitHub API     |
+      |   Gateway        |          +------------------+
+      |   (Docker)       |          +------------------+
+      |                  |--search->|  Brave Search    |
+      +--------+---------+          +------------------+
+               |
+               | OpenAI-compat API
+               | host.docker.internal:11434
+               |
+      +--------+---------+
+      |    Ollama        |
+      |    (Host)        |
+      | smart: qwen3:14b |
+      | fast: llama3.1:8b|
+      +------------------+
 ```
 
 ## Troubleshooting
