@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 # --- Configuration ---
 # Override $OLLAMA_MODELS in a wrapper script or set before dot-sourcing.
 # First model is the primary (smart); last model is used for subagents (fast).
-if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:14b", "llama3.1:8b") }
+if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:8b", "qwen3:14b") }
 
 # --- Telegram Channel (optional) ---
 if ($null -eq $SETUP_TELEGRAM)       { $SETUP_TELEGRAM = $false }
@@ -39,7 +39,10 @@ $modelDefaults = @{
     "llama3.1:70b" = @{ context = 131072; maxTokens = 4096 }
     "mistral:7b"   = @{ context = 32768;  maxTokens = 4096 }
     "gemma2:9b"    = @{ context = 8192;   maxTokens = 4096 }
-    "gemma2:27b"   = @{ context = 8192;   maxTokens = 4096 }
+    "gemma2:27b"        = @{ context = 8192;   maxTokens = 4096 }
+    "dolphin-mistral:7b"          = @{ context = 32768;  maxTokens = 4096 }
+    "wizard-vicuna-uncensored:13b" = @{ context = 32768;  maxTokens = 4096 }
+    "hermes3:8b"                   = @{ context = 131072; maxTokens = 4096 }
 }
 $defaultModelSpec = @{ context = 32768; maxTokens = 4096 }
 
@@ -50,9 +53,12 @@ $modelAliases = @{
     "qwen3:8b"     = "fast"
     "llama3.1:8b"  = "fast"
     "llama3.1:70b" = "smart"
-    "mistral:7b"   = "fast"
-    "gemma2:9b"    = "fast"
-    "gemma2:27b"   = "smart"
+    "mistral:7b"        = "fast"
+    "gemma2:9b"         = "fast"
+    "gemma2:27b"        = "smart"
+    "dolphin-mistral:7b"          = "uncensored"
+    "wizard-vicuna-uncensored:13b" = "uncensored"
+    "hermes3:8b"                   = "fast"
 }
 
 # --- Persist gateway token across runs ---
@@ -227,8 +233,8 @@ foreach ($model in $OLLAMA_MODELS) {
 }
 $aliasJson = $aliasEntries -join ",`n"
 
-# Subagent model: use the last model (typically the fastest/smallest)
-$subagentModel = if ($OLLAMA_MODELS.Count -gt 1) { $OLLAMA_MODELS[-1] } else { $primaryModel }
+# Subagent model: use the second model (typically the fastest/smallest)
+$subagentModel = if ($OLLAMA_MODELS.Count -gt 1) { $OLLAMA_MODELS[1] } else { $primaryModel }
 
 # Build tools config (Brave Search)
 $toolsBlock = ""
