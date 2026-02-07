@@ -9,10 +9,10 @@ The `setup.ps1` script automates the entire setup process:
 1. Detects Ollama installation (auto-starts if not running)
 2. Pulls all configured models
 3. Verifies Docker Desktop and Ollama connectivity
-4. Creates the OpenClaw config directory and `openclaw.json`
-5. Builds the OpenClaw Docker image from source (cached -- skips if unchanged)
-6. Starts the gateway container via Docker Compose
-7. Runs a health check and prints the dashboard URL
+4. Creates config directories (including `skills/`) and copies workspace templates (`AGENTS.md`)
+5. Writes `openclaw.json` with model config, aliases, and optional channels/tools
+6. Builds the OpenClaw Docker image from source (cached -- skips if unchanged)
+7. Starts the gateway container via Docker Compose and runs a health check
 
 The gateway token is persisted across runs, so your dashboard URL stays the same.
 
@@ -54,7 +54,7 @@ Edit the variables at the top of `setup.ps1` or override them in a wrapper scrip
 
 | Variable | Default | Description |
 |---|---|---|
-| `$OLLAMA_MODELS` | `@("qwen3:14b", "llama3.1:8b")` | Ollama models (first = primary "smart", last = subagent "fast") |
+| `$OLLAMA_MODELS` | `@("JOSIEFIED-Qwen3:4b-q8_0", "JOSIEFIED-Qwen3:14b")` | Ollama models (first = primary, last = subagents) |
 | `$SETUP_TELEGRAM` | `$false` | Enable Telegram channel |
 | `$TELEGRAM_BOT_TOKEN` | `""` | Bot token from @BotFather |
 | `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs (DMs) |
@@ -67,16 +67,21 @@ Edit the variables at the top of `setup.ps1` or override them in a wrapper scrip
 
 ### Multiple models and aliases
 
-By default, two models are registered:
-- **`qwen3:14b`** — primary model (alias: `smart`), used for main conversations
-- **`llama3.1:8b`** — fast model (alias: `fast`), used automatically for subagent tasks
+By default, two models are registered (from the JOSIEFIED abliterated series):
+- **`JOSIEFIED-Qwen3:4b-q8_0`** — primary model (alias: `fast`)
+- **`JOSIEFIED-Qwen3:14b`** — subagent model (alias: `smart`)
 
-Switch models in chat with `/model smart` or `/model fast`. Subagents (parallel helper tasks) always use the fast model automatically.
+> **Recommendation:** The stock `qwen3:14b` works more reliably for tool calls than the JOSIEFIED finetunes. For a single-model setup:
+> ```powershell
+> $OLLAMA_MODELS = @("qwen3:14b")
+> ```
+
+Switch models in chat with `/model smart` or `/model fast`. Subagents (parallel helper tasks) always use the last model in the list.
 
 Register additional models:
 
 ```powershell
-$OLLAMA_MODELS = @("qwen3:14b", "llama3.1:8b", "mistral:7b")
+$OLLAMA_MODELS = @("qwen3:14b", "qwen3:8b", "mistral:7b")
 .\setup.ps1
 ```
 
@@ -165,6 +170,24 @@ $TELEGRAM_GROUP_ALLOW = @("-1001234567890")
 
 To find a group ID, add the bot to the group and check the gateway logs.
 
+**Important:** The bot must have **Privacy Mode disabled** to see group messages:
+1. Message **@BotFather** -> `/mybots` -> select your bot -> Bot Settings -> Group Privacy -> Turn off
+2. **Remove and re-add** the bot to the group (Telegram only applies the change on rejoin)
+
+To make the bot respond to all messages (not just @mentions), set `requireMention: false` in `groups.<chatId>` in `openclaw.json` after setup.
+
+## Workspace Templates
+
+The `workspace-template/` directory contains files that are copied to the OpenClaw workspace on first run (existing files are not overwritten):
+
+- **`AGENTS.md`** -- Agent instructions (system prompt). Kept small (~900 chars) to stay within local LLM context limits. Includes memory conventions, safety rules, content policy, group chat behavior, and skill/subagent instructions.
+
+To customize the agent's behavior, edit `~/.openclaw/workspace/AGENTS.md` after setup. The template is only copied if the file doesn't already exist.
+
+### Skills
+
+The setup creates a `~/.openclaw/skills/` directory for custom skills. The bot can create new skills via the built-in `skill-creator` skill, or you can add them manually.
+
 ## Architecture
 
 ```
@@ -190,8 +213,6 @@ To find a group ID, add the bot to the group and check the gateway logs.
       +--------+---------+
       |    Ollama        |
       |    (Host)        |
-      | smart: qwen3:14b |
-      | fast: llama3.1:8b|
       +------------------+
 ```
 
@@ -212,6 +233,19 @@ Docker Desktop for Windows routes `host.docker.internal` to the host's localhost
 ### Gateway config invalid
 
 OpenClaw's `gateway.bind` only accepts: `loopback`, `lan`, `tailnet`, `auto`, `custom` -- not raw IPs.
+
+### Bot echoes messages or enters infinite loop
+
+The system prompt (`AGENTS.md`) may be too large for the model's context. Keep it under ~1K chars for 14B models. The default template in `workspace-template/` is already optimized for this. If you customized `AGENTS.md`, try trimming it.
+
+Some finetunes (e.g. JOSIEFIED-Qwen3) can cause tool-call loops. Switch to the stock model (`qwen3:14b`).
+
+### Bot doesn't respond in Telegram groups
+
+1. Privacy Mode must be **off** (see Telegram > Group chats above)
+2. Bot must be **removed and re-added** after changing privacy mode
+3. Group chat IDs are negative (e.g. `-1001234567890`)
+4. Small models (4B) may drop the minus from chat IDs, causing `chat not found` errors -- use 14B+
 
 ### Container keeps restarting
 
