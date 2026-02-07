@@ -5,9 +5,8 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 # Override $OLLAMA_MODELS in a wrapper script or set before dot-sourcing.
-# First model = primary (fast, main conversation); second = subagents (smart, parallel tasks).
-# All models are JOSIEFIED (abliterated, uncensored) from goekdenizguelmez on Ollama.
-if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0", "goekdenizguelmez/JOSIEFIED-Qwen3:14b") }
+# First model = primary (main conversation); additional models available via /model alias.
+if (-not $OLLAMA_MODELS) { $OLLAMA_MODELS = @("qwen3:14b") }
 
 # --- Telegram Channel (optional) ---
 if ($null -eq $SETUP_TELEGRAM)       { $SETUP_TELEGRAM = $false }
@@ -33,20 +32,16 @@ $OPENCLAW_REPO = "$env:USERPROFILE\workspace\openclaw\openclaw"
 
 # --- Model defaults (context window / max tokens) ---
 $modelDefaults = @{
-    "goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0" = @{ context = 131072; maxTokens = 8192 }
-    "goekdenizguelmez/JOSIEFIED-Qwen3:8b-q8_0" = @{ context = 131072; maxTokens = 8192 }
-    "goekdenizguelmez/JOSIEFIED-Qwen3:14b"     = @{ context = 131072; maxTokens = 8192 }
-    "qwen3:14b"    = @{ context = 131072; maxTokens = 8192 }
-    "qwen3:8b"     = @{ context = 131072; maxTokens = 8192 }
+    "qwen3:14b"    = @{ context = 131072; maxTokens = 16384 }
+    "qwen3:8b"     = @{ context = 131072; maxTokens = 16384 }
+    "qwen3:32b"    = @{ context = 131072; maxTokens = 16384 }
 }
-$defaultModelSpec = @{ context = 32768; maxTokens = 4096 }
+$defaultModelSpec = @{ context = 32768; maxTokens = 8192 }
 
 # --- Model aliases (for /model command in chat) ---
 $modelAliases = @{
-    "goekdenizguelmez/JOSIEFIED-Qwen3:4b-q8_0" = "fast"
-    "goekdenizguelmez/JOSIEFIED-Qwen3:8b-q8_0" = "fast"
-    "goekdenizguelmez/JOSIEFIED-Qwen3:14b"     = "smart"
     "qwen3:14b"    = "smart"
+    "qwen3:32b"    = "smart"
     "qwen3:8b"     = "fast"
 }
 

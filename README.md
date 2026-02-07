@@ -54,7 +54,7 @@ Edit the variables at the top of `setup.ps1` or override them in a wrapper scrip
 
 | Variable | Default | Description |
 |---|---|---|
-| `$OLLAMA_MODELS` | `@("JOSIEFIED-Qwen3:4b-q8_0", "JOSIEFIED-Qwen3:14b")` | Ollama models (first = primary, last = subagents) |
+| `$OLLAMA_MODELS` | `@("qwen3:14b")` | Ollama models (first = primary, last = subagents) |
 | `$SETUP_TELEGRAM` | `$false` | Enable Telegram channel |
 | `$TELEGRAM_BOT_TOKEN` | `""` | Bot token from @BotFather |
 | `$TELEGRAM_ALLOW_FROM` | `@()` | Allowed Telegram user IDs (DMs) |
@@ -67,14 +67,14 @@ Edit the variables at the top of `setup.ps1` or override them in a wrapper scrip
 
 ### Multiple models and aliases
 
-By default, two models are registered (from the JOSIEFIED abliterated series):
-- **`JOSIEFIED-Qwen3:4b-q8_0`** — primary model (alias: `fast`)
-- **`JOSIEFIED-Qwen3:14b`** — subagent model (alias: `smart`)
+By default, a single model is registered:
+- **`qwen3:14b`** — primary model (alias: `smart`), used for conversations and subagents
 
-> **Recommendation:** The stock `qwen3:14b` works more reliably for tool calls than the JOSIEFIED finetunes. For a single-model setup:
-> ```powershell
-> $OLLAMA_MODELS = @("qwen3:14b")
-> ```
+For a dual-model setup with a faster subagent model:
+
+```powershell
+$OLLAMA_MODELS = @("qwen3:14b", "qwen3:8b")
+```
 
 Switch models in chat with `/model smart` or `/model fast`. Subagents (parallel helper tasks) always use the last model in the list.
 
