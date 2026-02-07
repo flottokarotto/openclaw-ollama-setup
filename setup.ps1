@@ -258,7 +258,7 @@ if ($BRAVE_SEARCH_API_KEY) {
 $config = @"
 {
   "messages": {
-    "ackReactionScope": "group-mentions"
+    "ackReactionScope": "all"
   },
   "agents": {
     "defaults": {
@@ -321,7 +321,14 @@ $modelsJson
 # Build channels config
 if ($SETUP_TELEGRAM -and $TELEGRAM_BOT_TOKEN) {
     $allowFromJson = ($TELEGRAM_ALLOW_FROM | ForEach-Object { "`"$_`"" }) -join ", "
-    $groupAllowJson = ($TELEGRAM_GROUP_ALLOW | ForEach-Object { "`"$_`"" }) -join ", "
+
+    # Build groups config: each group gets requireMention: false so the bot responds to everything
+    $groupEntries = @()
+    foreach ($gid in $TELEGRAM_GROUP_ALLOW) {
+        $groupEntries += "        `"$gid`": { `"requireMention`": false }"
+    }
+    $groupsJson = if ($groupEntries.Count -gt 0) { $groupEntries -join ",`n" } else { "" }
+
     $telegramChannelJson = @"
 {
     "telegram": {
@@ -329,8 +336,11 @@ if ($SETUP_TELEGRAM -and $TELEGRAM_BOT_TOKEN) {
       "botToken": "$TELEGRAM_BOT_TOKEN",
       "dmPolicy": "allowlist",
       "allowFrom": [$allowFromJson],
-      "groupPolicy": "allowlist",
-      "groupAllowFrom": [$groupAllowJson]
+      "groupPolicy": "open",
+      "groupAllowFrom": [],
+      "groups": {
+$groupsJson
+      }
     }
   }
 "@

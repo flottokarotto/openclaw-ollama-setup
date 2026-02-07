@@ -162,19 +162,81 @@ To find your Telegram user ID, message **@userinfobot** or check the gateway log
 
 ### Group chats
 
-To allow the bot in Telegram groups, add the group IDs to `$TELEGRAM_GROUP_ALLOW`:
+Complete guide to get the bot working in Telegram groups -- reading and responding to all messages without @mention.
 
-```powershell
-$TELEGRAM_GROUP_ALLOW = @("-1001234567890")
+#### 1. BotFather settings
+
+Message **@BotFather** in Telegram:
+
+1. `/mybots` -> select your bot -> **Bot Settings** -> **Group Privacy** -> **Turn off**
+2. `/mybots` -> select your bot -> **Bot Settings** -> **Allow Groups?** -> make sure groups are allowed
+
+Verify the settings stuck:
+
+```
+/mybots -> select your bot -> Bot Settings -> Group Privacy
 ```
 
-To find a group ID, add the bot to the group and check the gateway logs.
+It should say "Privacy mode is disabled". If it still says enabled, toggle it again.
 
-**Important:** The bot must have **Privacy Mode disabled** to see group messages:
-1. Message **@BotFather** -> `/mybots` -> select your bot -> Bot Settings -> Group Privacy -> Turn off
-2. **Remove and re-add** the bot to the group (Telegram only applies the change on rejoin)
+#### 2. Add the bot to the group
 
-To make the bot respond to all messages (not just @mentions), set `requireMention: false` in `groups.<chatId>` in `openclaw.json` after setup.
+1. Open your Telegram group -> Add member -> search for your bot -> add it
+2. **If you changed Privacy Mode after the bot was already in the group:** remove the bot from the group and add it again. Telegram only applies privacy mode changes on rejoin.
+
+#### 3. Setup script config
+
+In your `run-telegram.ps1`, add the group ID:
+
+```powershell
+$SETUP_TELEGRAM = $true
+$TELEGRAM_BOT_TOKEN = "123456:ABC-DEF..."
+$TELEGRAM_ALLOW_FROM = @("your_user_id")
+$TELEGRAM_GROUP_ALLOW = @("-1001234567890")
+. "$PSScriptRoot\setup.ps1"
+```
+
+This generates the following config in `openclaw.json`:
+- `groupPolicy: "open"` -- accepts messages from all groups
+- `groups.<chatId>.requireMention: false` -- responds to all messages, not just @mentions
+- `ackReactionScope: "all"` -- sends read reactions on all messages
+
+#### 4. Find the group chat ID
+
+Group chat IDs are **negative numbers** (e.g. `-1001234567890`). To find yours:
+
+1. Add the bot to the group
+2. Send a message in the group
+3. Check the gateway logs:
+   ```powershell
+   docker compose -f openclaw/docker-compose.yml logs -f openclaw-gateway
+   ```
+4. Look for the `chat.id` value in the log output
+
+Alternatively, add **@userinfobot** to the group temporarily -- it will print the group ID.
+
+#### 5. Verify
+
+After setup, check that the bot can see messages:
+
+```powershell
+# Check bot settings via Telegram API
+docker exec openclaw-openclaw-gateway-1 node -e "
+  fetch('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe')
+    .then(r => r.json()).then(d => console.log(JSON.stringify(d.result, null, 2)))
+"
+```
+
+`can_read_all_group_messages` must be `true`. If it's `false`, repeat step 1 and re-add the bot to the group.
+
+#### Troubleshooting groups
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Bot doesn't see group messages | Privacy Mode still on | Disable in BotFather, remove + re-add bot |
+| Bot only responds to you | Other members not sending to the right group | Verify group chat ID in config |
+| `chat not found` errors | Missing minus in chat ID | Group IDs are negative, e.g. `-1001234567890` |
+| Bot echoes/loops | AGENTS.md too large or model finetune issue | Keep AGENTS.md under ~1K chars, use stock `qwen3:14b` |
 
 ## Workspace Templates
 
