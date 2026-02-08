@@ -36,7 +36,10 @@ switch ($Action) {
         Show-Status
         Write-Host ""
         Write-Host "=== Gateway Logs (last 20 lines) ===" -ForegroundColor Cyan
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
         docker logs --tail 20 openclaw-openclaw-gateway-1 2>&1
+        $ErrorActionPreference = $prev
     }
     default {
         Write-Host "Usage: .\manage.ps1 {start|stop|restart|status}"
